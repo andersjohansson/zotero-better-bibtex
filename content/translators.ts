@@ -18,6 +18,7 @@ import { sleep } from './sleep'
 import { flash } from './flash'
 import { $and, Query } from './db/loki'
 import { Events } from './events'
+import { Pinger } from './ping'
 
 import { override } from './prefs-meta'
 import * as translatorMetadata from '../gen/translators.json'
@@ -284,6 +285,7 @@ export const Translators = new class { // eslint-disable-line @typescript-eslint
       autoExport,
     }
 
+    const ping: { prepare?: Pinger, cache?: Pinger } = {}
     let items: any[] = []
     worker.onmessage = (e: { data: Translator.Worker.Message }) => {
       switch (e.data?.kind) {
@@ -333,6 +335,7 @@ export const Translators = new class { // eslint-disable-line @typescript-eslint
           }
           else {
             cache.insert({...selector, reference, metadata})
+            if (ping.cache) ping.cache.update()
           }
           break
 
@@ -390,27 +393,23 @@ export const Translators = new class { // eslint-disable-line @typescript-eslint
     }
     items = items.filter(item => !item.isAnnotation?.())
 
-    // notify every 5 percent
-    const step = 5
-    const batch = Math.round(((items.length * (translator.label.includes('CSL') ? 2 : 1)) / 100) * step) // eslint-disable-line no-magic-numbers
-    let serialized = 0
-
     let worked = Date.now()
     config.items = []
+    ping.prepare = new Pinger({
+      total: items.length * (translator.label.includes('CSL') ? 2 : 1),
+      callback: pct => Events.emit('export-progress', -pct, translator.label, autoExport),
+    })
     // use a loop instead of map so we can await for beachball protection
     for (const item of items) {
       config.items.push(Serializer.fast(item))
 
       // sleep occasionally so the UI gets a breather
-      if ((Date.now() - worked) > 1000) { // eslint-disable-line no-magic-numbers
+      if ((Date.now() - worked) > 100) { // eslint-disable-line no-magic-numbers
         await sleep(0) // eslint-disable-line no-magic-numbers
         worked = Date.now()
       }
 
-      serialized += 1
-      if ((serialized % batch) === 0) {
-        Events.emit('export-progress', -Math.floor(serialized / batch) * step, translator.label, autoExport)
-      }
+      ping.prepare.update()
     }
     if (job.path && job.canceled) {
       log.debug('export to', job.path, 'started at', job.started, 'canceled')
@@ -443,8 +442,14 @@ export const Translators = new class { // eslint-disable-line @typescript-eslint
       cache.cloneObjects = cloneObjects
       cache.dirty = true
 
-      // eslint-disable-next-line no-magic-numbers
-      if (typeof autoExport === 'number') Events.emit('cache-rate', autoExport, Math.round((Object.keys(config.cache).length * 100) / config.items.length))
+      if (typeof autoExport === 'number') {
+        ping.cache = new Pinger({
+          start: Object.keys(config.cache).length,
+          // undercount the cache somewhat to hit 100% in the display
+          total: config.items.length * 0.99, // eslint-disable-line no-magic-numbers
+          callback: pct => Events.emit('cache-rate', autoExport, pct),
+        })
+      }
     }
 
     // pre-fetch CSL serializations
@@ -455,30 +460,18 @@ export const Translators = new class { // eslint-disable-line @typescript-eslint
         if (config.cache[item.itemID]) continue
 
         config.cslItems[item.itemID] = Zotero.Utilities.itemToCSLJSON(item)
-        serialized += 1
-        if ((serialized % batch) === 0) Events.emit('export-progress', -Math.floor(serialized / batch) * step, translator.label, autoExport)
+        ping.prepare.update()
       }
     }
+    ping.prepare.done()
 
     // if the average startup time is greater than the autoExportDelay, bump up the delay to prevent stall-cascades
     this.workers.startup += Math.ceil((Date.now() - start) / 1000) // eslint-disable-line no-magic-numbers
     // eslint-disable-next-line no-magic-numbers
     if (this.workers.total > 5 && (this.workers.startup / this.workers.total) > Preference.autoExportDelay) Preference.autoExportDelay = Math.ceil(this.workers.startup / this.workers.total)
-    log.debug('worker:', { avgstartup: this.workers.startup / this.workers.total, startup: Date.now() - start, caching, workers: this.workers, autoExportDelay: Preference.autoExportDelay })
 
     log.debug('worker: kicking off')
     worker.postMessage({ kind: 'start', config: JSON.parse(JSON.stringify(config)) })
-
-    /*
-    const interval = setInterval(() => {
-      if ((Date.now() - now) > 10000) { // eslint-disable-line no-magic-numbers
-        clearInterval(interval)
-      }
-      else {
-        worker.postMessage({ kind: 'ping' })
-      }
-    }, 500) // eslint-disable-line no-magic-numbers
-    */
 
     return deferred.promise
   }
