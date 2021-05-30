@@ -90,6 +90,7 @@ AddonManager.addAddonListener({
 */
 
 if (Preference.citeprocNoteCitekey) {
+  log.debug('citeprocNoteCitekey: enabled')
   $patch$(Zotero.Utilities, 'itemToCSLJSON', original => function itemToCSLJSON(zoteroItem: { itemID: number, itemType: string }) {
     const cslItem = original.apply(this, arguments)
 
