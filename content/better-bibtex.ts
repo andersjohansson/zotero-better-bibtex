@@ -90,15 +90,17 @@ AddonManager.addAddonListener({
 */
 
 if (Preference.citeprocNoteCitekey) {
-  $patch$(Zotero.Utilities, 'itemToCSLJSON', original => function itemToCSLJSON(zoteroItem: { itemID: any }) {
+  $patch$(Zotero.Utilities, 'itemToCSLJSON', original => function itemToCSLJSON(zoteroItem: { itemID: number, itemType: string }) {
     const cslItem = original.apply(this, arguments)
 
-    if (typeof Zotero.Item !== 'undefined' && !(zoteroItem instanceof Zotero.Item)) {
+    if (!(zoteroItem instanceof Zotero.Item)) {
       const citekey = Zotero.BetterBibTeX.KeyManager.get(zoteroItem.itemID)
       if (citekey) {
+        log.debug('citeprocNoteCitekey: found', citekey)
         cslItem.note = citekey.citekey
       }
       else {
+        log.debug('citeprocNoteCitekey: no citekey found for', zoteroItem.itemType)
         delete cslItem.note
       }
     }
