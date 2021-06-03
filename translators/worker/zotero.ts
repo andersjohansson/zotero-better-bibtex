@@ -131,7 +131,8 @@ class WorkerZoteroUtilities {
   }
 }
 
-function makeDirs(path) {
+function makeDirs(path, context) {
+  log.debug('makeDirs:', { path, context })
   if (!OS.Path.split(path).absolute) throw new Error(`Will not make relative ${path}`)
 
   path = OS.Path.normalize(path)
@@ -158,7 +159,7 @@ function saveFile(path, overwrite) {
   if (!this.path.startsWith(Zotero.exportDirectory)) throw new Error(`${path} looks like a relative path`)
 
   if (this.linkMode === 'imported_file' || (this.linkMode === 'imported_url' && this.contentType !== 'text/html')) {
-    makeDirs(OS.Path.dirname(this.path))
+    makeDirs(OS.Path.dirname(this.path), { path: this.path, linkMode: this.linkMode })
     OS.File.copy(this.localPath, this.path, { noOverwrite: !overwrite })
   }
   else if (this.linkMode === 'imported_url') {
@@ -166,7 +167,7 @@ function saveFile(path, overwrite) {
     if (!overwrite && OS.File.exists(target)) throw new Error(`${path} would overwite ${target}`)
 
     OS.File.removeDir(target, { ignoreAbsent: true })
-    makeDirs(target)
+    makeDirs(target, { path: this.path, linkMode: this.linkMode })
 
     const snapshot = OS.Path.dirname(this.localPath)
     const iterator = new OS.File.DirectoryIterator(snapshot)
@@ -216,7 +217,7 @@ class WorkerZotero {
         if (!this.exportFile.endsWith(ext)) this.exportFile += ext
         this.exportDirectory = OS.Path.dirname(this.exportFile)
       }
-      makeDirs(this.exportDirectory)
+      makeDirs(this.exportDirectory, { exportFileData: this.config.options.exportFileData, workerContext })
     }
     else {
       this.exportFile = ''
