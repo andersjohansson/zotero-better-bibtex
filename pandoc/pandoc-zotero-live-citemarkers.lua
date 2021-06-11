@@ -122,30 +122,34 @@ local function zotero_ref(cite)
     citationItems = {},
     schema = "https://github.com/citation-style-language/schema/raw/master/csl-citation.json"
   }
+  local ait = ''
+
   for k, item in pairs(cite.citations) do
-    local itemData, zoteroData = zotero.get(item.id)
-    if itemData == nil then
+	 local itemData, zoteroData = zotero.get(item.id)
+	 if itemData == nil then
       return cite
     end
 
-    if item.mode == 'AuthorInText' then -- not formally supported in Zotero
-      if config.author_in_text then
+	 local citation = {
+		id = zoteroData.itemID,
+		uris = { zoteroData.uri },
+		uri = { zoteroData.uri },
+		itemData = itemData,
+	 }
+
+	 if item.mode == 'AuthorInText' then -- not formally supported in Zotero
+		if config.author_in_text then
         local authors = zotero.authors(itemData)
         if authors == nil then
           return cite
         else
-          return pandoc.Str(authors)
+		   ait = pandoc.utils.stringify(pandoc.Str(authors)) .. ' '
+		   citation['suppress-author'] = true
         end
       else
         return cite
       end
     end
-    local citation = {
-      id = zoteroData.itemID,
-      uris = { zoteroData.uri },
-      uri = { zoteroData.uri },
-      itemData = itemData,
-    }
 
     if item.mode == 'SuppressAuthor' then
       citation['suppress-author'] = true
@@ -161,26 +165,27 @@ local function zotero_ref(cite)
 
   local message = '<Do Zotero Refresh: ' .. content .. '>'
 
-  if config.format == 'docx' then
-    local field = '<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve">'
-    field = field .. ' ADDIN ZOTERO_ITEM CSL_CITATION ' .. utils.xmlescape(json.encode(csl)) .. '   '
-    field = field .. '</w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:rPr><w:noProof/></w:rPr><w:t>'
-    field = field .. utils.xmlescape(message)
-    field = field .. '</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>'
 
-    return pandoc.RawInline('openxml', field)
+  if config.format == 'docx' then
+	 local field = ait ..'<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve">'
+	 field = field .. ' ADDIN ZOTERO_ITEM CSL_CITATION ' .. utils.xmlescape(json.encode(csl)) .. '   '
+	 field = field .. '</w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:rPr><w:noProof/></w:rPr><w:t>'
+	 field = field .. utils.xmlescape(message)
+	 field = field .. '</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>'
+
+	 return pandoc.RawInline('openxml', field)
   else
     if config.transferable then
-      local field = ''
-        .. '<text:a xlink:type="simple" xlink:href="https://www.zotero.org/" text:style-name="Internet_20_link">'
-        .. 'ITEM CSL_CITATION '
-        .. utils.xmlescape(json.encode(csl))
-        .. '</text:a>'
+	   local field = ait
+		  .. '<text:a xlink:type="simple" xlink:href="https://www.zotero.org/" text:style-name="Internet_20_link">'
+		  .. 'ITEM CSL_CITATION '
+		  .. utils.xmlescape(json.encode(csl))
+		  .. '</text:a>'
       return pandoc.RawInline('opendocument', field)
     end
 
     csl = 'ZOTERO_ITEM CSL_CITATION ' .. utils.xmlescape(json.encode(csl)) .. ' RND' .. utils.random_id(10)
-    local field = '<text:reference-mark-start text:name="' .. csl .. '"/>'
+    local field = ait .. '<text:reference-mark-start text:name="' .. csl .. '"/>'
     field = field .. utils.xmlescape(message)
     field = field .. '<text:reference-mark-end text:name="' .. csl .. '"/>'
 
